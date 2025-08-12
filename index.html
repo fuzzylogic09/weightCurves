@@ -85,10 +85,13 @@ async function loadData() {
   try {
     reloadCounter++;
     const now = Date.now() + reloadCounter;
-    
+    console.log(`Paramètre cache-busting now = ${now}`);
+
     const dataUrl = `${baseURL}poids.txt?nocache=${now}`;
     const lmsUrl = `${baseURL}LMS_fille.csv?nocache=${now}`;
-    const dobStr = "15-01-2023";
+    const dobStr = "23-05-2023";
+
+    console.log(`Chargement de poids.txt depuis : ${dataUrl}`);
 
     const [userTxt, lmsTxt] = await Promise.all([
       fetch(dataUrl, {cache:"no-store"}).then(r => {
@@ -100,6 +103,8 @@ async function loadData() {
         return r.text();
       })
     ]);
+
+    
 
     const dob = parseDateFR(dobStr);
 
