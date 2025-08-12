@@ -26,9 +26,10 @@
 <script>
 // ===== CONFIG =====
 const dob = "15-01-2023"; // Date de naissance JJ-MM-AAAA
-const whoCsvUrl = "LMS_fille.csv"; // CSV OMS avec Month,L,M,S
-const dataUrl = "poids.txt"; // Fichier utilisateur
+const whoCsvUrl = "https://fuzzylogic09.github.io/weightCurves/LMS_fille.csv"; // CSV OMS avec Month,L,M,S
+const dataUrl = "https://fuzzylogic09.github.io/weightCurves/poids.txt"; // Fichier utilisateur
 
+  
 // ===== FONCTIONS =====
 function parseDateFR(dateStr) {
     const [d, m, y] = dateStr.split('-').map(Number);
