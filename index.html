@@ -32,7 +32,10 @@
 
 <script>
 const baseURL = "https://fuzzylogic09.github.io/weightCurves/";
+let reloadCounter = 0;
 
+
+  
 function parseDateFR(str) {
   const [d,m,y] = str.split("-").map(Number);
   return new Date(y,m-1,d);
@@ -80,7 +83,9 @@ function findNearestLMS(lms, age) {
 
 async function loadData() {
   try {
-    const now = Date.now();
+    reloadCounter++;
+    const now = Date.now() + reloadCounter;
+    
     const dataUrl = `${baseURL}poids.txt?nocache=${now}`;
     const lmsUrl = `${baseURL}LMS_fille.csv?nocache=${now}`;
     const dobStr = "15-01-2023";
