@@ -3,154 +3,178 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title courbes de croissance OMS</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.0"></script>
+<title>Croissance Enfant</title>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 <style>
-  body {
-    font-family: Arial, sans-serif;
-    margin: 0;
-    padding: 0;
-  }
-  canvas {
-    max-width: 100%;
-    height: auto;
-  }
-  .chart-container {
-    width: 95%;
-    margin: auto;
-  }
+  body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+  .graph-container { width: 100%; max-width: 900px; margin: auto; }
+  #lastPoint { text-align: center; font-weight: bold; margin: 10px; }
 </style>
 </head>
 <body>
 
-<h2>Courbes de croissance (Z-Score)</h2>
-<div class="chart-container">
-  <canvas id="zscoreChart"></canvas>
-</div>
+<div class="graph-container">
+  <h2>Z-score</h2>
+  <div id="zscorePlot"></div>
+  
+  <h2>Percentiles</h2>
+  <div id="percentilePlot"></div>
 
-<h2>Courbes de croissance (Percentiles)</h2>
-<div class="chart-container">
-  <canvas id="percentileChart"></canvas>
+  <div id="lastPoint">Chargement...</div>
 </div>
-
-<p id="lastPoint"></p>
 
 <script>
-const now = Date.now();
-const dataUrl = `https://fuzzylogic09.github.io/weightCurves/poids.txt?nocache=${now}`;
-const lmsUrl  = `https://fuzzylogic09.github.io/weightCurves/LMS_fille.csv?nocache=${now}`;
-const birthDate = "01-01-2023"; // JJ-MM-AAAA
+// ===== CONFIG =====
+const dob = "15-01-2023"; // Date de naissance JJ-MM-AAAA
+const whoCsvUrl = "LMS_fille.csv"; // CSV OMS avec Month,L,M,S
+const dataUrl = "poids.txt"; // Fichier utilisateur
 
-function parseDate(dateStr) {
-    const [day, month, year] = dateStr.split("-").map(Number);
-    return new Date(year, month - 1, day);
+// ===== FONCTIONS =====
+function parseDateFR(dateStr) {
+    const [d, m, y] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
 }
 
-function ageInMonths(d1, d2) {
-    return ((d2.getFullYear() - d1.getFullYear()) * 12) + (d2.getMonth() - d1.getMonth()) + (d2.getDate() - d1.getDate())/30.4375;
+function ageInMonths(dob, date) {
+    return (date.getFullYear() - dob.getFullYear()) * 12 +
+           (date.getMonth() - dob.getMonth()) +
+           (date.getDate() - dob.getDate()) / 30.4375;
 }
 
-function zscoreFromWeight(ageMonths, weight, lmsData) {
-    const entry = lmsData.find(d => Math.abs(d.Month - ageMonths) < 0.01);
-    if (!entry) return null;
-    const { L, M, S } = entry;
+function weightFromZ(L, M, S, z) {
+    if (L === 0) return M * Math.exp(S * z);
+    return M * Math.pow(1 + L * S * z, 1 / L);
+}
+
+function zFromWeight(L, M, S, weight) {
+    if (L === 0) return Math.log(weight / M) / S;
     return (Math.pow(weight / M, L) - 1) / (L * S);
 }
 
 function percentileFromZ(z) {
-    return 0.5 * (1 + erf(z / Math.sqrt(2))) * 100;
+    const p = 0.5 * (1 + erf(z / Math.sqrt(2)));
+    return p * 100;
 }
 
 function erf(x) {
     const sign = x >= 0 ? 1 : -1;
     x = Math.abs(x);
-    const t = 1 / (1 + 0.3275911 * x);
-    const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+    const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+    const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+    const t = 1 / (1 + p * x);
+    const y = 1 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t*Math.exp(-x*x);
     return sign * y;
 }
 
-async function loadData() {
-    const userRes = await fetch(dataUrl, { cache: "no-store" });
-    const lmsRes  = await fetch(lmsUrl,  { cache: "no-store" });
+function findNearestLMS(lms, age) {
+    return lms.reduce((prev, curr) => 
+        Math.abs(curr.month - age) < Math.abs(prev.month - age) ? curr : prev
+    );
+}
 
-    if (!userRes.ok) throw new Error(`Erreur chargement poids.txt: ${userRes.status}`);
-    if (!lmsRes.ok) throw new Error(`Erreur chargement LMS_fille.csv: ${lmsRes.status}`);
+// ===== CHARGEMENT =====
+Promise.all([
+    fetch(whoCsvUrl).then(r => r.text()),
+    fetch(dataUrl).then(r => r.text())
+]).then(([whoCsv, userTxt]) => {
+    console.log("OMS CSV chargé:\n", whoCsv);
+    console.log("Poids.txt chargé:\n", userTxt);
 
-    const userText = await userRes.text();
-    const lmsText  = await lmsRes.text();
+    const dobDate = parseDateFR(dob);
 
-    const lmsData = lmsText.trim().split("\n").slice(1).map(line => {
-        const [Month, L, M, S] = line.split(",").map(Number);
-        return { Month, L, M, S };
+    // OMS LMS
+    const lms = whoCsv.trim().split("\n").slice(1).map(line => {
+        const [month, L, M, S] = line.split(",").map(Number);
+        return { month, L, M, S };
     });
 
-    const birth = parseDate(birthDate);
-    const userData = userText.trim().split("\n").map(line => {
-        const [dateStr, weightStr] = line.split(/\s+/);
-        const date = parseDate(dateStr);
-        return {
-            age: ageInMonths(birth, date),
-            weight: parseFloat(weightStr)
+    // Données utilisateur
+    const userData = userTxt.trim().split("\n").map(line => {
+        const parts = line.split(",");
+        if (parts.length < 2) {
+            console.warn("Ligne invalide ignorée:", line);
+            return null;
+        }
+        const date = parseDateFR(parts[0].trim());
+        const weight = parseFloat(parts[1]);
+        return { 
+            date, 
+            age: ageInMonths(dobDate, date), 
+            weight
         };
-    });
+    }).filter(d => d !== null);
 
-    const zData = userData.map(d => ({
-        x: d.age,
-        y: zscoreFromWeight(d.age, d.weight, lmsData)
-    }));
+    console.log("Données utilisateur parsées:", userData);
 
-    const pData = zData.map(d => ({
-        x: d.x,
-        y: percentileFromZ(d.y)
-    }));
-
-    drawCharts(lmsData, zData, pData);
-
-    if (userData.length > 0) {
-        const lastZ = zData[zData.length - 1].y.toFixed(2);
-        const lastP = pData[pData.length - 1].y.toFixed(1);
-        document.getElementById("lastPoint").innerText =
-            `Dernier point → Z-score : ${lastZ}, Percentile : ${lastP}`;
+    if (userData.length === 0) {
+        document.getElementById("lastPoint").textContent = "Aucune donnée utilisateur valide";
+        return;
     }
-}
 
-function drawCharts(lmsData, zData, pData) {
-    const ctxZ = document.getElementById('zscoreChart').getContext('2d');
-    const ctxP = document.getElementById('percentileChart').getContext('2d');
-
-    const sdLines = [-3,-2,-1,0,1,2,3].map(sd => ({
-        label: `SD${sd>=0?'+':''}${sd}`,
-        data: lmsData.map(d => ({x: d.Month, y: sd})),
-        borderColor: `hsl(${(sd+3)*50},70%,50%)`,
-        fill: false,
-        borderWidth: 1,
-        pointRadius: 0
+    // === Graphique Percentiles ===
+    const zLevels = [-1.881, -1.036, 0, 1.036, 1.881]; // ~ P3, P15, P50, P85, P97
+    const percLabels = ["P3", "P15", "P50", "P85", "P97"];
+    const percentileTraces = zLevels.map((z, i) => ({
+        x: lms.map(d => d.month),
+        y: lms.map(d => weightFromZ(d.L, d.M, d.S, z)),
+        mode: "lines",
+        name: percLabels[i],
+        line: { dash: (i === 2 ? "solid" : "dot") }
     }));
 
-    new Chart(ctxZ, {
-        type: 'line',
-        data: { datasets: [...sdLines, { label: 'Enfant', data: zData, borderColor: 'black', backgroundColor: 'black', showLine: false, pointRadius: 5 }] },
-        options: { responsive: true, plugins: { zoom: { zoom: { wheel: {enabled: true}, pinch: {enabled: true}, mode: 'xy'} } }, scales: { x: { type: 'linear', min: 0, max: 48 } } }
+    percentileTraces.push({
+        x: userData.map(d => d.age),
+        y: userData.map(d => d.weight),
+        mode: "markers+lines",
+        name: "Données enfant",
+        marker: { size: 8, color: "red" }
     });
 
-    const percentiles = [3,15,50,85,97].map(p => ({
-        label: `P${p}`,
-        data: lmsData.map(d => ({x: d.Month, y: p})),
-        borderColor: `hsl(${p},70%,50%)`,
-        fill: false,
-        borderWidth: 1,
-        pointRadius: 0
+    Plotly.newPlot("percentilePlot", percentileTraces, {
+        xaxis: { title: "Âge (mois)" },
+        yaxis: { title: "Poids (kg)" },
+        responsive: true
+    });
+
+    // === Graphique Z-score ===
+    const zUser = userData.map(d => {
+        const ref = findNearestLMS(lms, d.age);
+        return zFromWeight(ref.L, ref.M, ref.S, d.weight);
+    });
+
+    const zscoreTrace = {
+        x: userData.map(d => d.age),
+        y: zUser,
+        mode: "markers+lines",
+        name: "Z-score",
+        marker: { size: 8, color: "blue" }
+    };
+
+    const zRefLines = Array.from({length: 7}, (_,i) => i-3).map(z => ({
+        x: [0, 48], y: [z, z],
+        mode: "lines",
+        name: `z=${z}`,
+        line: { dash: "dot", color: "gray" },
+        hoverinfo: "skip"
     }));
 
-    new Chart(ctxP, {
-        type: 'line',
-        data: { datasets: [...percentiles, { label: 'Enfant', data: pData, borderColor: 'black', backgroundColor: 'black', showLine: false, pointRadius: 5 }] },
-        options: { responsive: true, plugins: { zoom: { zoom: { wheel: {enabled: true}, pinch: {enabled: true}, mode: 'xy'} } }, scales: { x: { type: 'linear', min: 0, max: 48 }, y: { min: 0, max: 100 } } }
+    Plotly.newPlot("zscorePlot", [zscoreTrace, ...zRefLines], {
+        xaxis: { title: "Âge (mois)" },
+        yaxis: { title: "Z-score" },
+        responsive: true
     });
-}
 
-loadData().catch(err => console.error(err));
+    // === Dernier point ===
+    const last = userData[userData.length - 1];
+    const lastRef = findNearestLMS(lms, last.age);
+    const lastZ = zFromWeight(lastRef.L, lastRef.M, lastRef.S, last.weight);
+    const lastP = percentileFromZ(lastZ);
+    document.getElementById("lastPoint").textContent =
+        `Dernier point : z-score = ${lastZ.toFixed(2)}, percentile ≈ ${lastP.toFixed(1)}%`;
+
+}).catch(err => {
+    console.error("Erreur de chargement:", err);
+});
 </script>
 
 </body>
