@@ -25,9 +25,10 @@
 
 <script>
 // ===== CONFIG =====
+const now = Date.now();
 const dob = "15-01-2023"; // Date de naissance JJ-MM-AAAA
-const whoCsvUrl = "LMS_fille.csv"; // CSV OMS avec Month,L,M,S
-const dataUrl = "poids.txt"; // Fichier utilisateur
+const whoCsvUrl = "LMS_fille.csv?nocache=${now}"; // CSV OMS avec Month,L,M,S
+const dataUrl = "poids.txt?nocache=${now}"; // Fichier utilisateur
 
 // ===== FONCTIONS =====
 function parseDateFR(dateStr) {
