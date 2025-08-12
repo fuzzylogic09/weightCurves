@@ -31,7 +31,41 @@
 const baseURL = "https://fuzzylogic09.github.io/weightCurves/";
 let reloadCounter = 0;
 
+const layoutPercentile = {
+  xaxis: {
+    title: { text: "Âge (mois)", font: { size: 12 } },
+    range: [0, 48],
+    tickfont: { size: 10 },
+    automargin: true,
+  },
+  yaxis: {
+    title: { text: "Poids (kg)", font: { size: 12 } },
+    tickfont: { size: 10 },
+    automargin: true,
+  },
+  showlegend: false,
+  margin: {l: 40, r: 20, t: 20, b: 40},
+  autosize: true,
+  responsive: true
+};
 
+const layoutZscore = {
+  xaxis: {
+    title: { text: "Âge (mois)", font: { size: 12 } },
+    range: [0, 48],
+    tickfont: { size: 10 },
+    automargin: true,
+  },
+  yaxis: {
+    title: { text: "Z-score", font: { size: 12 } },
+    tickfont: { size: 10 },
+    automargin: true,
+  },
+  showlegend: false,
+  margin: {l: 40, r: 20, t: 20, b: 40},
+  autosize: true,
+  responsive: true
+};
   
 function parseDateFR(str) {
   const [d,m,y] = str.split("-").map(Number);
@@ -138,11 +172,7 @@ async function loadData() {
       line: { color: "red" }
     });
 
-    Plotly.newPlot("percentilePlot", percentileTraces, {
-      xaxis: {title: "Âge (mois)", range: [0, 48]},
-      yaxis: {title: "Poids (kg)"},
-      responsive: true
-    });
+    Plotly.newPlot("percentilePlot", percentileTraces, layoutPercentile);
 
     // Z-score
     const zUser = userData.map(d => {
@@ -168,11 +198,7 @@ async function loadData() {
       hoverinfo: "skip"
     }));
 
-    Plotly.newPlot("zscorePlot", [zscoreTrace, ...zRefLines], {
-      xaxis: {title: "Âge (mois)", range: [0, 48]},
-      yaxis: {title: "Z-score"},
-      responsive: true
-    });
+    Plotly.newPlot("zscorePlot", [zscoreTrace, ...zRefLines], layoutZscore);
 
     if(userData.length > 0) {
       const last = userData[userData.length-1];
