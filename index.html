@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Croissance Enfante</title>
+<title>Croissance Enfant</title>
 <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 <style>
   body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
@@ -27,7 +27,7 @@
 // ===== CONFIG =====
 const dob = "15-01-2023"; // Date de naissance JJ-MM-AAAA
 const whoCsvUrl = "LMS_fille.csv"; // CSV OMS avec Month,L,M,S
-const dataUrl = "poids.txt"; // Fichier utilisateur (JJ-MM-AAAA,poids)
+const dataUrl = "poids.txt"; // Fichier utilisateur
 
 // ===== FONCTIONS =====
 function parseDateFR(dateStr) {
@@ -52,13 +52,11 @@ function zFromWeight(L, M, S, weight) {
 }
 
 function percentileFromZ(z) {
-    // Approximation CDF gaussienne
     const p = 0.5 * (1 + erf(z / Math.sqrt(2)));
     return p * 100;
 }
 
 function erf(x) {
-    // Approximation fonction d'erreur
     const sign = x >= 0 ? 1 : -1;
     x = Math.abs(x);
     const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
@@ -68,11 +66,20 @@ function erf(x) {
     return sign * y;
 }
 
-// ===== CHARGEMENT DES DONNÉES =====
+function findNearestLMS(lms, age) {
+    return lms.reduce((prev, curr) => 
+        Math.abs(curr.month - age) < Math.abs(prev.month - age) ? curr : prev
+    );
+}
+
+// ===== CHARGEMENT =====
 Promise.all([
     fetch(whoCsvUrl).then(r => r.text()),
     fetch(dataUrl).then(r => r.text())
 ]).then(([whoCsv, userTxt]) => {
+    console.log("OMS CSV chargé:\n", whoCsv);
+    console.log("Poids.txt chargé:\n", userTxt);
+
     const dobDate = parseDateFR(dob);
 
     // OMS LMS
@@ -83,17 +90,29 @@ Promise.all([
 
     // Données utilisateur
     const userData = userTxt.trim().split("\n").map(line => {
-        const [dateStr, wStr] = line.split(",");
-        const date = parseDateFR(dateStr.trim());
+        const parts = line.split(",");
+        if (parts.length < 2) {
+            console.warn("Ligne invalide ignorée:", line);
+            return null;
+        }
+        const date = parseDateFR(parts[0].trim());
+        const weight = parseFloat(parts[1]);
         return { 
             date, 
             age: ageInMonths(dobDate, date), 
-            weight: parseFloat(wStr)
+            weight
         };
-    });
+    }).filter(d => d !== null);
 
-    // Graphique Percentiles
-    const zLevels = [-1.881, -1.036, 0, 1.036, 1.881]; // ≈ P3, P15, P50, P85, P97
+    console.log("Données utilisateur parsées:", userData);
+
+    if (userData.length === 0) {
+        document.getElementById("lastPoint").textContent = "Aucune donnée utilisateur valide";
+        return;
+    }
+
+    // === Graphique Percentiles ===
+    const zLevels = [-1.881, -1.036, 0, 1.036, 1.881]; // ~ P3, P15, P50, P85, P97
     const percLabels = ["P3", "P15", "P50", "P85", "P97"];
     const percentileTraces = zLevels.map((z, i) => ({
         x: lms.map(d => d.month),
@@ -117,10 +136,9 @@ Promise.all([
         responsive: true
     });
 
-    // Graphique Z-score
+    // === Graphique Z-score ===
     const zUser = userData.map(d => {
-        const ref = lms.find(r => Math.abs(r.month - d.age) < 0.5);
-        if (!ref) return null;
+        const ref = findNearestLMS(lms, d.age);
         return zFromWeight(ref.L, ref.M, ref.S, d.weight);
     });
 
@@ -146,14 +164,16 @@ Promise.all([
         responsive: true
     });
 
-    // Dernier point
+    // === Dernier point ===
     const last = userData[userData.length - 1];
-    const lastRef = lms.find(r => Math.abs(r.month - last.age) < 0.5);
+    const lastRef = findNearestLMS(lms, last.age);
     const lastZ = zFromWeight(lastRef.L, lastRef.M, lastRef.S, last.weight);
     const lastP = percentileFromZ(lastZ);
     document.getElementById("lastPoint").textContent =
         `Dernier point : z-score = ${lastZ.toFixed(2)}, percentile ≈ ${lastP.toFixed(1)}%`;
 
+}).catch(err => {
+    console.error("Erreur de chargement:", err);
 });
 </script>
 
