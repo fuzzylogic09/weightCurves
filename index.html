@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Courbes de poids (WHO) — Fille 0-48 mois</title>
+
+  <!-- Plotly CDN (interactive, zoom/pan/responsive) -->
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+  <style>
+    html,body { height:100%; margin:0; font-family: Arial, Helvetica, sans-serif; background:#fff; color:#111; }
+    .container { display:flex; flex-direction:column; height:100vh; padding:12px; box-sizing:border-box; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    header h1 { margin:0; font-size:1.1rem; }
+    #meta { font-size:0.9rem; color:#444; }
+    #plot { flex:1 1 auto; min-height:300px; }
+    footer { font-size:0.85rem; color:#666; padding-top:8px; }
+    @media(min-width:900px){ header h1 { font-size:1.4rem; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Courbes WHO — poids pour fille (0–48 mois)</h1>
+      <div id="meta">
+        Date de naissance (fixe) : <strong id="birth-date">--</strong><br/>
+        Source WHO : tables officielles.
+      </div>
+    </header>
+
+    <div id="plot"></div>
+
+    <footer>
+      Les points proviennent d'un fichier texte (raw) sur GitLab — format : <code>jj-mm-aaaa poids_kg</code>. Zoom / pan : utiliser souris ou gestes tactiles.
+    </footer>
+  </div>
+
+<script>
+/* ========== CONFIG ========== */
+/* Remplacez ces valeurs avant déploiement */
+const BIRTH_DATE = "15-03-2024"; // jj-mm-aaaa, écrit en dur dans la page
+const RAW_GITLAB_URL = "https://gitlab.com/<user>/<repo>/-/raw/main/data_points.txt";
+const whoCsvPath = "who_wfa_girls_0_48.csv"; // si dans même repo GitHub Pages
+
+document.getElementById('birth-date').textContent = BIRTH_DATE;
+
+/* ========== UTILITAIRES ========== */
+function parseDateDDMMYYYY(s){
+  const [d,m,y] = s.trim().split(/[-\/]/).map(x=>parseInt(x,10));
+  if(!d||!m||!y) return null;
+  return new Date(Date.UTC(y,m-1,d));
+}
+function monthsBetween(dateBirth, dateSample){
+  // mois décimaux : jours / avg days per month
+  const msPerDay = 24*3600*1000;
+  const diffDays = (dateSample - dateBirth) / msPerDay;
+  const months = diffDays / 30.4375; // moyenne (365.2425/12)
+  return months;
+}
+
+/* CSV simple -> tableau d'objets */
+async function fetchCSV(path){
+  const r = await fetch(path);
+  if(!r.ok) throw new Error("Impossible de charger: "+path);
+  const txt = await r.text();
+  const lines = txt.split(/\r?\n/).filter(Boolean);
+  const header = lines[0].split(',').map(h=>h.trim());
+  const rows = lines.slice(1).map(l => {
+    const vals = l.split(',');
+    const obj = {};
+    header.forEach((h,i)=> obj[h]= vals[i] ? vals[i].trim(): "");
+    return obj;
+  });
+  return rows;
+}
+
+/* Parse points text file (jj-mm-aaaa valeur par ligne) */
+async function fetchUserPoints(rawUrl){
+  const r = await fetch(rawUrl);
+  if(!r.ok) {
+    console.warn("Impossible de charger le fichier utilisateur :", rawUrl, r.status);
+    return [];
+  }
+  const txt = await r.text();
+  const lines = txt.split(/\r?\n/);
+  const pts = [];
+  for(const ln of lines){
+    const l = ln.trim();
+    if(!l || l.startsWith('#')) continue;
+    const m = l.match(/^(\d{1,2}[-\/]\d{1,2}[-\/]\d{4})\s+([0-9]+(?:[.,][0-9]+)?)$/);
+    if(!m) continue;
+    const dateS = m[1].replace(/\//g,'-');
+    const w = parseFloat(m[2].replace(',','.'));
+    const d = parseDateDDMMYYYY(dateS);
+    if(!d) continue;
+    pts.push({dateStr: dateS, dateObj:d, weight: w});
+  }
+  return pts;
+}
+
+/* Interpolation linéaire pour centiles WHO si âge non entier (on suppose file WHO mois entiers) */
+function interpCentileRows(rows, month){
+  // rows: array objects with 'age_months' field
+  const ages = rows.map(r=>parseFloat(r.age_months));
+  const i = ages.findIndex(a=> a >= month);
+  if(i===0) return rows[0];
+  if(i===-1) return rows[rows.length-1];
+  const hi = rows[i], lo = rows[i-1];
+  const a0 = parseFloat(lo.age_months), a1 = parseFloat(hi.age_months);
+  const t = (month - a0) / (a1 - a0);
+  const out = {age_months: month.toFixed(3)};
+  Object.keys(lo).forEach(k=>{
+    if(k==="age_months") return;
+    const v0 = parseFloat(lo[k]), v1 = parseFloat(hi[k]);
+    if(isNaN(v0) || isNaN(v1)) out[k] = "";
+    else out[k] = v0 + (v1 - v0)*t;
+  });
+  return out;
+}
+
+/* ========== MAIN ========== */
+async function main(){
+  try{
+    // 1) charger WHO CSV
+    const whoRows = await fetchCSV(whoCsvPath); // attend que tu aies who_wfa_girls_0_48.csv dans repo
+    // Standardiser : age_months numérique
+    const who = whoRows.map(r=>{
+      const o = {};
+      Object.entries(r).forEach(([k,v])=>{
+        o[k.trim()] = v===undefined? "": v.trim();
+      });
+      o.age_months = parseFloat(o.age_months);
+      return o;
+    });
+
+    // 2) charger points utilisateur depuis GitLab
+    const userPts = await fetchUserPoints(RAW_GITLAB_URL);
+
+    // 3) calculer âge en mois pour chaque point et pour naissance (0)
+    const birth = parseDateDDMMYYYY(BIRTH_DATE);
+    if(!birth){ throw new Error("Date de naissance invalide : "+BIRTH_DATE); }
+
+    const userXs = userPts.map(p => {
+      const ageMonths = monthsBetween(birth, p.dateObj);
+      return {age: ageMonths, weight: p.weight, dateStr:p.dateStr};
+    }).sort((a,b)=>a.age-b.age);
+
+    // 4) préparer traces WHO (parcentiles)
+    // On prend les champs du csv (sauf age_months) comme courbes
+    const percentileKeys = Object.keys(who[0] || {}).filter(k=> k !== 'age_months');
+    const traces = [];
+    // convertir who en arrays X,Y (ages, val) pour chaque percentile
+    percentileKeys.forEach(key=>{
+      const x = who.map(r=> r.age_months);
+      const y = who.map(r=> parseFloat(r[key]));
+      traces.push({
+        x, y,
+        name: key,
+        mode: 'lines',
+        hovertemplate: 'mois %{x:.1f}<br>'+key+': %{y:.2f} kg<extra></extra>',
+        line: {width: key==='p50' ? 3 : 1.5, dash: key==='p50' ? 'solid' : 'dash'},
+        opacity: key==='p50'?1:0.7
+      });
+    });
+
+    // 5) trace points utilisateur
+    const ux = userXs.map(p=>p.age);
+    const uy = userXs.map(p=>p.weight);
+    const pointTrace = {
+      x: ux,
+      y: uy,
+      mode: 'markers+lines',
+      name: 'Mesures enfant',
+      marker:{size:8,symbol:'circle'},
+      line:{width:2, dash:'solid'},
+      hovertemplate: '%{x:.2f} mois<br>%{y:.2f} kg<br><extra></extra>'
+    };
+    traces.push(pointTrace);
+
+    // 6) layout responsive
+    const layout = {
+      title: `Poids vs âge (mois). Date de naissance: ${BIRTH_DATE}`,
+      xaxis:{title:'Âge (mois)', range:[0,48], fixedrange:false},
+      yaxis:{title:'Poids (kg)'},
+      legend:{orientation:'h', y:-0.15},
+      margin:{t:60, b:80, l:70, r:20}
+    };
+
+    const config = {responsive:true, displayModeBar:true, modeBarButtonsToAdd:['select2d','lasso2d']};
+
+    Plotly.newPlot('plot', traces, layout, config);
+
+  } catch(e){
+    console.error(e);
+    document.getElementById('plot').innerHTML = "<p style='color:red'>Erreur: " + (e.message||e) + "</p>";
+  }
+}
+
+main();
+</script>
+</body>
+</html>
